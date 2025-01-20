@@ -1,1 +1,3 @@
-Credits to Tomas de la Rosa <trosa@inf.uc3m.es> [original PDDL generator](https://github.com/AI-Planning/pddl-generators/tree/main/agricola).
+Extension of Agricola from IPC 2014 ([original version](https://github.com/AI-Planning/pddl-generators/tree/main/agricola)). Credits to Tomas de la Rosa <trosa@inf.uc3m.es>.
+
+Agricola is turn-based resource-allocation puzzle game. The critical decision point is to make sure to produce enough food to feed a (growing) population. The probabilistic version extends the classical planning version by adding probabilistic outcomes to the food-producing actions, probabilistically varying the amount of food that is produced. The generator should guarantee that there always exist a (proper) solution. Howvever, managing resources badly will also give rise to tons of dead ends.

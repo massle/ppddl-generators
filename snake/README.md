@@ -1,1 +1,3 @@
-Credits to original (classical) PDDL version (e.g., [here](https://github.com/AI-Planning/pddl-generators/tree/main/snake)). Generator was written from scratch.
+Extension of the classical planning Snake domain from IPC 2014. The PDDL domain file was built from the classical version (e.g., [here](https://github.com/AI-Planning/pddl-generators/tree/main/snake)). The generator was written from scratch.
+
+Contrary to the classical planning version, here, whenever the snake eats an apple, the next apple is be placed at a random position on the map. The goal is to consume N apples. To ensure the existence of a proper policy, there are additional "exit" actions, which at a high cost, reset the length of the snake to the initial length of 2. There can still be dead ends, e.g., if one maneuvers the snake such that it can no longer move without bumping into itself or potential other obstacles.
