@@ -81,14 +81,15 @@ def generate(
 
         MOVE_GHOST_ACTIONS.append(f"""
 (:action move-ghost-{probability_distribution_id}
-    :parameters (?a - ghost {' '.join(parameters)})
+    :parameters (?a - ghost ?p - pacmanagent {' '.join(parameters)})
     :precondition (and
         (CONNECTED_GHOST_{probability_distribution_id} {' '.join(parameter_names)})
         (at ?a ?x)
+        (not (at ?p ?x))
         (looking ?a ?d)
         (turn ?a)
     )
-    :effect (and (increase (total-cost) 1) 
+    :effect (and  
         (not (turn ?a)) (turn_check_kill ?a)
         (not (at ?a ?x)) (not (looking ?a ?d))
 {get_probabilistic_effect (probabilistic_effects, tab=8)}
@@ -136,7 +137,7 @@ def generate(
 
     DOMAIN_TEMPLATE = f"""
 (define (domain pacman)
-    (:requirements :typing :negative-preconditions :probabilistic-effects)
+    (:requirements :strips :typing :negative-preconditions :action-costs :probabilistic-effects)
 
     (:types location agent direction - object
             pacmanagent ghost - agent)
@@ -153,7 +154,7 @@ def generate(
 {backslash_join(CONNECTED_GHOST_PREDICATES, tab=8)}
        )
 
-    (:action move
+    (:action move-pacman
         :parameters (?a - pacmanagent ?x ?y - location ?n - agent)
         :precondition (and
             (CONNECTED_PACMAN ?x ?y)
@@ -164,37 +165,46 @@ def generate(
         )
         :effect (and (increase (total-cost) 1)
             (not (at ?a ?x)) (at ?a ?y)
-            (not (turn ?a))    (turn ?n)
+            (not (turn ?a))  (turn ?n)
             (not (has-point ?y))
         )
     )
 
 {backslash_join(MOVE_GHOST_ACTIONS, tab=4)}
 
-    (:action check-kill-yes 
-        :parameters (?a - ghost ?p - pacmanagent ?x - location ?n - agent)
+    (:action kill-pacman-before-moving
+        :parameters (?a - ghost ?p - pacmanagent ?x - location)
         :precondition (and
             (at ?a ?x)
             (at ?p ?x)
-            (turn_check_kill ?a) 
-            (TURN_ORDER ?a ?n)
+            (turn ?a)
         )
-        :effect (and (increase (total-cost) 1)
-            (not (turn_check_kill ?a)) (turn ?n)
-            (not (alive))
+        :effect (and (increase (total-cost) 500)
+                     (not (alive))
         )
     )
 
-    (:action check-kill-no
-        :parameters (?a - ghost ?p - pacmanagent ?x ?y - location ?n - agent)
+    (:action kill-pacman-after-moving
+        :parameters (?a - ghost ?p - pacmanagent ?x - location)
         :precondition (and
             (at ?a ?x)
-            (at ?p ?y)
-            (not (= ?x ?y))
+            (at ?p ?x)
+            (turn ?a)
+        )
+        :effect (and (increase (total-cost) 500)
+                     (not (alive))
+        )
+    )
+
+    (:action pass-turn
+        :parameters (?a - ghost ?p - pacmanagent ?x - location ?n - agent)
+        :precondition (and
+            (at ?a ?x)
+            (not (at ?p ?x))
             (turn_check_kill ?a)
             (TURN_ORDER ?a ?n)
         )
-        :effect (and (increase (total-cost) 1)
+        :effect (and 
             (not (turn_check_kill ?a)) (turn ?n)
         )
     )
