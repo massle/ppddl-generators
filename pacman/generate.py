@@ -81,11 +81,12 @@ def generate(
 
         MOVE_GHOST_ACTIONS.append(f"""
 (:action move-ghost-{probability_distribution_id}
-    :parameters (?a - ghost ?p - pacmanagent {' '.join(parameters)})
+    :parameters (?a - ghost ?p - pacmanagent ?y - location {' '.join(parameters)})
     :precondition (and
         (CONNECTED_GHOST_{probability_distribution_id} {' '.join(parameter_names)})
         (at ?a ?x)
-        (not (at ?p ?x))
+        (not (= ?x ?y))
+        (at ?p ?y)
         (looking ?a ?d)
         (turn ?a)
     )
@@ -197,10 +198,11 @@ def generate(
     )
 
     (:action pass-turn
-        :parameters (?a - ghost ?p - pacmanagent ?x - location ?n - agent)
+        :parameters (?a - ghost ?p - pacmanagent ?x ?y - location ?n - agent)
         :precondition (and
             (at ?a ?x)
-            (not (at ?p ?x))
+            (not (= ?x ?y))
+            (at ?p ?y)
             (turn_check_kill ?a)
             (TURN_ORDER ?a ?n)
         )
@@ -208,6 +210,12 @@ def generate(
             (not (turn_check_kill ?a)) (turn ?n)
         )
     )
+
+;    (:action win-game
+;        :parameters ()
+;        :precondition (and (forall (?x - location) (not (has-point ?x))))
+;        :effect (not (alive))
+;    )
 )
     """
     PROBLEM_TEMPLATE = f"""
