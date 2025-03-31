@@ -2,7 +2,7 @@
 
 import argparse
 from collections import defaultdict
-
+import random
 import ghostAgents
 from layout import Layout
 from game import Directions, Actions
@@ -22,7 +22,9 @@ def get_probabilistic_effect (effects, tab):
             '\n' + " "*tab + ")")
 
 def generate(
-    layout : Layout
+        layout : Layout,
+        sampled_food : int,
+        target_points : int
 ) -> (str, str):
 
     CONNECTED_GHOST_PREDICATES = []
@@ -105,21 +107,27 @@ def generate(
 
         INITIAL_STATE.append(f"(CONNECTED_GHOST_{sources_to_distribution_ids[(pos_src, dir_src)]} {' '.join(parameter_list)})")
 
-    num_points = 0
-    for position in positions:
-        if layout.isFood(position):
-            INITIAL_STATE.append(f"(has-point {loc_name(position)})")
-            num_points += 1
-            #GOAL.append(f"(not (has-point {loc_name(position)}))")
 
-    OBJECTS += [f"num{i} - num" for i in range(num_points + 1)]
-    INITIAL_STATE.append(f"(WINNING_POINTS num{num_points})")
+    food_positions = [position for position in positions if layout.isFood(position)]
+
+    if sampled_food:
+        food_positions = random.sample(food_positions, sampled_food)
+        assert (len(food_positions) == sampled_food)
+
+    if not target_points: 
+        target_points = len(food_positions)
+
+    assert target_points <= len(food_positions)
+
+    OBJECTS += [f"num{i} - num" for i in range(target_points + 1)]
+    INITIAL_STATE += [f"(has-point {loc_name(position)})" for position in food_positions]
+    INITIAL_STATE.append(f"(WINNING_POINTS num{target_points})")
     INITIAL_STATE.append(f"(eaten num0)")
-    INITIAL_STATE += [f"(NEXT_NUMBER num{i} num{i+1})" for i in range(num_points)]
-    GOAL.append(f"(eaten num{num_points})")
+    INITIAL_STATE += [f"(NEXT_NUMBER num{i} num{i+1})" for i in range(target_points)]
+    GOAL.append(f"(eaten num{target_points})")
 
 
-    INITIAL_STATE += [f"(= (lose-cost num{i}) {500 + 10*(num_points - i)})" for i in range(num_points)]
+    INITIAL_STATE += [f"(= (killed-cost num{i}) {500 + 10*(target_points - i)})" for i in range(target_points)]
     previous_agent = None
     for i, (is_pacman, position) in enumerate(layout.agentPositions):
         if is_pacman:
@@ -168,7 +176,7 @@ def generate(
        )
 
     (:functions (total-cost) - number
-                (lose-cost ?x - num) - number
+                (killed-cost ?x - num) - number
     )
 
     (:action move-pacman
@@ -216,7 +224,7 @@ def generate(
             (WINNING_POINTS ?win)
             (not (WINNING_POINTS ?curr_points))
         )
-        :effect (and (increase (total-cost) (lose-cost ?curr_points))
+        :effect (and (increase (total-cost) (killed-cost ?curr_points))
                      (not (eaten ?curr_points)) (eaten ?win)
         )
     )
@@ -257,12 +265,18 @@ def generate(
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("layout", type=str, help="Layout file")
+    p.add_argument("--food", type=int, default=0, help="number of food. By default (0) all food in the layout. Otherwise, it is subsampled.")
+    p.add_argument("--points", type=int, default=0, help="number of food to be collected. By default (0) all food. Otherwise, it should be lower than the total number of food.")
+
+    p.add_argument("--seed", type=int, help="RNG seed", default=1734)
     args = p.parse_args()
 
+    random.seed(args.seed)
+    
     with open(args.layout) as f:
         layout = Layout(f.read().splitlines())
 
-        domain, problem = generate(layout)
+        domain, problem = generate(layout, args.food, args.points)
         with open('domain.pddl', 'w') as f:
             f.write(domain)
 
