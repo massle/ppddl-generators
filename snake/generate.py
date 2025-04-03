@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 
 import argparse
+import os
 import random
+import re
 from collections.abc import Iterable
 from fractions import Fraction
 
@@ -41,11 +43,29 @@ DOMAIN = """
             (increase (total-cost) {exit_cost})
             (not (headSnake ?head))
             (headSnake ?newHead)
-            (tailSnake ?head)
-            (nextSnake ?newHead ?head)
-            (blocked ?head)
+            (tailSnake ?newHead)
             (blocked ?newHead)
 {exit_effect}
+        )
+    )
+
+    (:action move
+    :parameters (?head ?newHead - loc)
+    :precondition (and
+        (headSnake ?head)
+        (tailSnake ?head)
+        (ADJACENT ?head ?newHead)
+        (not (blocked ?newHead))
+        (not (isPoint ?newHead))
+        )
+    :effect (and
+        (blocked ?newHead)
+        (headSnake ?newHead)
+        (tailSnake ?newHead)
+        (not (headSnake ?head))
+        (not (tailSnake ?head))
+        (not (blocked ?head))
+        (increase (total-cost) 1)
         )
     )
 
@@ -55,18 +75,19 @@ DOMAIN = """
         (headSnake ?head)
         (ADJACENT ?head ?newHead)
         (tailSnake ?tail)
-        (nextSnake ?newTail ?tail)
+        (nextSnake ?tail ?newTail)
         (not (blocked ?newHead))
         (not (isPoint ?newHead))
+        (not (= ?head ?tail))
         )
     :effect (and
         (blocked ?newHead)
         (headSnake ?newHead)
-        (nextSnake ?newHead ?head)
+        (nextSnake ?head ?newHead)
         (not (headSnake ?head))
         (not (blocked ?tail))
         (not (tailSnake ?tail))
-        (not (nextSnake ?newTail ?tail))
+        (not (nextSnake ?tail ?newTail))
         (tailSnake ?newTail)
         (increase (total-cost) 1)
         )
@@ -85,7 +106,7 @@ DOMAIN = """
     :effect (and
         (blocked ?newHead)
         (headSnake ?newHead)
-        (nextSnake ?newHead ?head)
+        (nextSnake ?head ?newHead)
         (not (headSnake ?head))
         (not (isPoint ?newHead))
         (not (collectedPoints ?curPoints))
@@ -100,7 +121,7 @@ DOMAIN = """
 
 
 PROBLEM = """
-(define (problem snake-{dim0}-{dim1}-{seed})
+(define (problem snake-{name}-{seed})
 (:domain snake)
 (:objects
     {num} - num
@@ -113,10 +134,8 @@ PROBLEM = """
     {blocked}
     {apples}
     (blocked grid-{x0}-{y0})
-    (blocked grid-{x1}-{y1})
     (headSnake grid-{x0}-{y0})
-    (tailSnake grid-{x1}-{y1})
-    (nextSnake grid-{x0}-{y0} grid-{x1}-{y1})
+    (tailSnake grid-{x0}-{y0})
     (collectedPoints n0)
 )
 (:goal (and
@@ -133,6 +152,7 @@ class Board:
     APPLE = "a"
 
     def __init__(self, path: str):
+        self.name: str = re.sub(r"[^\w]+", "-", os.path.basename(path).split(".")[0])
         self.board: list[list[str]] = []
         with open(path, encoding="ascii") as f:
             for line in f.readlines():
@@ -282,8 +302,7 @@ def generate_problem(board: Board, seed: int, numPoints: int) -> str:
         if board.board[x][y] != Board.WALL:
             apples.append((x, y))
     return PROBLEM.format(
-        dim0=board.dim0,
-        dim1=board.dim1,
+        name=board.name,
         seed=seed,
         num=" ".join((f"n{i}" for i in range(numPoints + 1))),
         nexxt=board.get_next(numPoints + 1),
@@ -293,8 +312,6 @@ def generate_problem(board: Board, seed: int, numPoints: int) -> str:
         apples=board.get_apples(apples),
         x0=x0,
         y0=y0,
-        x1=x1,
-        y1=y1,
         points=numPoints,
     )
 

@@ -1,24 +1,24 @@
 #! /usr/bin/env python3
 
 import math
-import sys
 import random
+import sys
 
 import euclidean_graph
 
 MAX_SEED = 10000000
 
 
-def road(f, t, length, plow_cost):
+def road(f, t, length, group):
     length = int(math.ceil(length / 10.0))
     print(f"  (road_unknown {f} {t})")
     print("  (= (road-length %s %s) %d)" % (f, t, length))
-    print("  (= (plow-cost %s %s) %d)" % (f, t, plow_cost))
+    print("  (ROAD_GROUP %s %s group-%d)" % (f, t, group))
 
 
-def symmetric_road(f, t, length, plow_cost):
-    road(f, t, length, plow_cost)
-    road(t, f, length, plow_cost)
+def symmetric_road(f, t, length, group):
+    road(f, t, length, group)
+    road(t, f, length, group)
 
 
 def shortest_route(ca, cb, ox, oy):
@@ -41,33 +41,23 @@ def shortest_route(ca, cb, ox, oy):
 
 if len(sys.argv) != 10:
     raise SystemExit(
-        "Usage: <cost-mode:DISTANCE|SIZE|SQUARE_SIZE> <cities> <nodes> <size^(1/2)> <degree> <mindistance> <nr-trucks> <nr-packages> <seed>"
+        "Usage: <cities> <nodes> <size^(1/2)> <degree> <mindistance> <nr-trucks> <nr-packages> <road_types> <seed>"
     )
 
-cost_mode = sys.argv[1]
-
-n_cities = int(sys.argv[2])
-nodes = int(sys.argv[3])
-size = int(sys.argv[4])
-degree = float(sys.argv[5])
-epsilon = float(sys.argv[6])
-trucks = int(sys.argv[7])
-packages = int(sys.argv[8])
+n_cities = int(sys.argv[1])
+nodes = int(sys.argv[2])
+size = int(sys.argv[3])
+degree = float(sys.argv[4])
+epsilon = float(sys.argv[5])
+trucks = int(sys.argv[6])
+packages = int(sys.argv[7])
+road_types = int(sys.argv[8])
 seed = float(sys.argv[9])
-
-if cost_mode.lower() == "distance":
-    plow_cost = epsilon
-elif cost_mode.lower() == "size":
-    plow_cost = size
-elif cost_mode.lower() == "square_size":
-    plow_cost = size * size
-else:
-    raise SystemExit(
-        "Usage: <cost-mode:DISTANCE|SIZE|SQUARE_SIZE> <cities> <nodes> <size^(1/2)> <degree> <mindistance> <nr-trucks> <nr-packages> <seed>"
-    )
 
 max_capacity = 4  # maximum number of packages in one truck
 assert max_capacity > 2
+
+assert road_types > 0
 
 if not seed:
     seed = random.randrange(MAX_SEED) + 1
@@ -86,7 +76,7 @@ cities = [
 ]
 
 city_connections = {
-    (i,j): shortest_route(cities[i], cities[j], size, 2 * size)
+    (i, j): shortest_route(cities[i], cities[j], size, 2 * size)
     for i in range(n_cities - 1)
     for j in range(i + 1, n_cities)
 }
@@ -115,15 +105,25 @@ for i in range(packages):
 for i in range(max_capacity + 1):
     print("  capacity-%d - capacity-number" % i)
 
+for i in range(road_types):
+    print("  group-%d - road-group" % i)
+
 print(" )")
 print(" (:init")
 
 print("  (= (total-cost) 0)")
 print("  (plow)")
 
+for i in range(road_types - 1):
+    print("  (NEXT_GROUP group-%d group-%d)" % (i, i + 1))
+print("  (NEXT_GROUP group-%d END-GROUP)" % (road_types - 1))
+
+print("  (current_group group-0)")
 
 for i in range(max_capacity):
     print("  (capacity-predecessor capacity-%d capacity-%d)" % (i, i + 1))
+
+max_length = 0
 
 for j in range(n_cities):
     for u, v in cities[j].edges:
@@ -134,36 +134,38 @@ for j in range(n_cities):
             "city-%d-" % (j + 1) + u.name,
             "city-%d-" % (j + 1) + v.name,
             dist,
-            plow_cost,
+            random.randint(0, road_types - 1),
         )
 
-for i,j in city_connections:
+        max_length = max(max_length, dist)
+
+for i, j in city_connections:
     connect_ac, dist_ac = city_connections[(i, j)]
     symmetric_road(
         "city-%d-" % (i + 1) + connect_ac[0].name,
         "city-%d-" % (j + 1) + connect_ac[1].name,
         dist_ac,
-        plow_cost,
+        random.randint(0, road_types - 1),
     )
+    max_length = max(max_length, dist_ac)
+
+max_length = int(math.ceil(max_length))
+
+for i in range(road_types):
+    print("  (= (plow-cost group-%d) %d)" % (i, random.randint(2 * max_length + 1, (1 + nodes) * max_length + 1)))
 
 truck_loc = []
 for i in range(trucks):
-    c,l = random.randint(1, n_cities), random.choice(cities[0].vertices).name
+    c, l = random.randint(1, n_cities), random.choice(cities[0].vertices).name
     truck_loc.append((c, l))
-    print(
-        "  (at truck-%d city-%d-%s)"
-        % (i + 1, c, l)
-    )
+    print("  (at truck-%d city-%d-%s)" % (i + 1, c, l))
     capacity = random.randint(2, 4)
     print("  (capacity truck-%d capacity-%d)" % (i + 1, capacity))
 
 package_loc = {}
 for i in range(packages):
-    c,l = random.randint(1, n_cities), random.choice(cities[0].vertices).name
-    package_loc["package-%d" % (i + 1)] = (
-        c,
-        l
-    )
+    c, l = random.randint(1, n_cities), random.choice(cities[0].vertices).name
+    package_loc["package-%d" % (i + 1)] = (c, l)
     print(
         "  (at package-%d city-%d-%s)"
         % (
