@@ -30,7 +30,7 @@ def generate(
     OBJECTS = []
     INITIAL_STATE = []
     GOAL = []
-
+    
     positions = layout.getLegalPositions()
     ghostAgent = ghostAgents.RandomGhost()
 
@@ -69,8 +69,8 @@ def generate(
     sources_to_distribution_ids = {src : id_map [prob] for (src, prob) in sources_to_distributions.items()}
 
     for (probability_distribution_id, prob_dist) in probability_distributions_by_id.items():
-        parameters = ["?x - location", "?d - direction"]
-        parameter_names = ["?x", "?d"]
+        parameters = ["?a_loc - location", "?a_dir - direction"]
+        parameter_names = ["?a_loc", "?a_dir"]
         probabilistic_effects = []
         for i in range(1, len(prob_dist) + 1):
             parameters += [f"?x{i} - location", f"?d{i} - direction"]
@@ -81,18 +81,18 @@ def generate(
 
         MOVE_GHOST_ACTIONS.append(f"""
 (:action move-ghost-{probability_distribution_id}
-    :parameters (?a - ghost ?p - pacmanagent ?y - location {' '.join(parameters)})
+    :parameters (?a - ghost ?p - pacmanagent ?p_loc - location {' '.join(parameters)})
     :precondition (and
         (CONNECTED_GHOST_{probability_distribution_id} {' '.join(parameter_names)})
-        (at ?a ?x)
-        (not (= ?x ?y))
-        (at ?p ?y)
-        (looking ?a ?d)
+        (at ?a ?a_loc)
+        (at ?p ?p_loc)
+        (not (= ?a_loc ?p_loc))
+        (looking ?a ?a_dir)
         (turn ?a)
     )
     :effect (and  
         (not (turn ?a)) (turn_check_kill ?a)
-        (not (at ?a ?x)) (not (looking ?a ?d))
+        (not (at ?a ?a_loc)) (not (looking ?a ?a_dir))
 {get_probabilistic_effect (probabilistic_effects, tab=8)}
     )
 )
@@ -105,11 +105,21 @@ def generate(
 
         INITIAL_STATE.append(f"(CONNECTED_GHOST_{sources_to_distribution_ids[(pos_src, dir_src)]} {' '.join(parameter_list)})")
 
+    num_points = 0
     for position in positions:
         if layout.isFood(position):
             INITIAL_STATE.append(f"(has-point {loc_name(position)})")
-            GOAL.append(f"(not (has-point {loc_name(position)}))")
+            num_points += 1
+            #GOAL.append(f"(not (has-point {loc_name(position)}))")
 
+    OBJECTS += [f"num{i} - num" for i in range(num_points + 1)]
+    INITIAL_STATE.append(f"(WINNING_POINTS num{num_points})")
+    INITIAL_STATE.append(f"(eaten num0)")
+    INITIAL_STATE += [f"(NEXT_NUMBER num{i} num{i+1})" for i in range(num_points)]
+    GOAL.append(f"(eaten num{num_points})")
+
+
+    INITIAL_STATE += [f"(= (lose-cost num{i}) {500 + 10*(num_points - i)})" for i in range(num_points)]
     previous_agent = None
     for i, (is_pacman, position) in enumerate(layout.agentPositions):
         if is_pacman:
@@ -133,14 +143,14 @@ def generate(
 
     INITIAL_STATE.append(f"(TURN_ORDER {previous_agent} {first_agent})")
     INITIAL_STATE.append(f"(turn {first_agent})")
-    INITIAL_STATE.append(f"(alive)")
-    GOAL.append(f"(alive)")
+    #INITIAL_STATE.append(f"(alive)")
+    # GOAL.append(f"(alive)")
 
     DOMAIN_TEMPLATE = f"""
 (define (domain pacman)
     (:requirements :strips :typing :negative-preconditions :action-costs :probabilistic-effects)
 
-    (:types location agent direction - object
+    (:types location agent direction num - object
             pacmanagent ghost - agent)
             
     (:predicates
@@ -149,51 +159,65 @@ def generate(
         (looking ?a - ghost ?d - direction)
         (turn ?a - agent)
         (turn_check_kill ?a - ghost) 
-        (alive)
+        (eaten ?x - num)
         (CONNECTED_PACMAN ?x ?y - location)
         (TURN_ORDER ?x ?y - agent)
+        (NEXT_NUMBER ?x ?y - num)
+        (WINNING_POINTS ?x - num)
 {backslash_join(CONNECTED_GHOST_PREDICATES, tab=8)}
        )
 
+    (:functions (total-cost) - number
+                (lose-cost ?x - num) - number
+    )
+
     (:action move-pacman
-        :parameters (?a - pacmanagent ?x ?y - location ?n - agent)
+        :parameters (?a - pacmanagent ?old_loc ?new_loc - location ?next_agent - agent)
+        :precondition (and
+            (CONNECTED_PACMAN ?old_loc ?new_loc)
+            (at ?a ?old_loc)
+            (turn ?a)
+            (TURN_ORDER ?a ?next_agent)
+            (not (has-point ?new_loc))
+        )
+        :effect (and (increase (total-cost) 1)
+            (not (at ?a ?old_loc)) (at ?a ?new_loc)
+            (not (turn ?a))  (turn ?next_agent)
+        )
+    )
+    
+    (:action move-pacman-eat
+        :parameters (?a - pacmanagent ?x ?y - location ?n - agent ?cur_points ?next_points - num)
         :precondition (and
             (CONNECTED_PACMAN ?x ?y)
             (at ?a ?x)
-            (alive)
             (turn ?a)
             (TURN_ORDER ?a ?n)
+            (eaten ?cur_points)
+            (NEXT_NUMBER ?cur_points ?next_points)
+            (has-point ?y)
         )
         :effect (and (increase (total-cost) 1)
             (not (at ?a ?x)) (at ?a ?y)
             (not (turn ?a))  (turn ?n)
+            (not (eaten ?cur_points)) (eaten ?next_points)
             (not (has-point ?y))
         )
     )
 
 {backslash_join(MOVE_GHOST_ACTIONS, tab=4)}
 
-    (:action kill-pacman-before-moving
-        :parameters (?a - ghost ?p - pacmanagent ?x - location)
+    (:action kill-pacman
+        :parameters (?a - ghost ?p - pacmanagent ?x - location ?curr_points ?win - num)
         :precondition (and
             (at ?a ?x)
             (at ?p ?x)
-            (turn ?a)
+            (eaten ?curr_points)
+            (WINNING_POINTS ?win)
+            (not (WINNING_POINTS ?curr_points))
         )
-        :effect (and (increase (total-cost) 500)
-                     (not (alive))
-        )
-    )
-
-    (:action kill-pacman-after-moving
-        :parameters (?a - ghost ?p - pacmanagent ?x - location)
-        :precondition (and
-            (at ?a ?x)
-            (at ?p ?x)
-            (turn ?a)
-        )
-        :effect (and (increase (total-cost) 500)
-                     (not (alive))
+        :effect (and (increase (total-cost) (lose-cost ?curr_points))
+                     (not (eaten ?curr_points)) (eaten ?win)
         )
     )
 
@@ -210,12 +234,6 @@ def generate(
             (not (turn_check_kill ?a)) (turn ?n)
         )
     )
-
-;    (:action win-game
-;        :parameters ()
-;        :precondition (and (forall (?x - location) (not (has-point ?x))))
-;        :effect (not (alive))
-;    )
 )
     """
     PROBLEM_TEMPLATE = f"""
@@ -226,12 +244,13 @@ def generate(
     )
     (:init
 {backslash_join(INITIAL_STATE, tab=8)}
+    (= (total-cost) 0)
     )
-    (:goal (and
-{backslash_join(GOAL, tab=8)}
-    ))
+    (:goal {backslash_join(GOAL)})
+
     (:metric minimize (total-cost))
 )"""
+#    {backslash_join(GOAL, tab=8)}
 
     return DOMAIN_TEMPLATE, PROBLEM_TEMPLATE
 
