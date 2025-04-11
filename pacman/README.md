@@ -1,6 +1,8 @@
 Version of Pacman based on an assignment at Uni Berkeley.
 
-The current version simplifies things by ignoring pills, and assuming that all agents move at the same velocity.
+The current version simplifies things by ignoring pills, and assuming that all agents move
+at the same velocity, and that ghosts behaviour does only depend on their current position
+and direction.
 
 In the original game, the objective is to maximize reward, with the following reward function:
  -1 for each step taken
