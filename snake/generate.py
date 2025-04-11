@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 
 import argparse
+import os
 import random
+import re
 from collections.abc import Iterable
 from fractions import Fraction
 
@@ -27,25 +29,42 @@ DOMAIN = """
         (collectedPoints ?n - num)
         (ADJACENT ?x ?y - loc) ;up down left right of a field
         (NEXT ?n0 ?n1 - num)
-        (BORDER_ADJACENT ?x ?y - loc)
+        (RESPAWN-POINT ?x - loc)
     )
 
-    (:action exit
-        :parameters (?head ?newHead - loc)
+    (:action respawn
+        :parameters (?head)
         :precondition (and
             (headSnake ?head)
-            (BORDER_ADJACENT ?head ?newHead)
-            (not (blocked ?newHead))
+            (RESPAWN-POINT ?head)
         )
         :effect (and 
             (increase (total-cost) {exit_cost})
             (not (headSnake ?head))
-            (headSnake ?newHead)
-            (tailSnake ?head)
-            (nextSnake ?newHead ?head)
-            (blocked ?head)
-            (blocked ?newHead)
+            (not (blocked ?head))
+            (probabilistic
 {exit_effect}
+            )
+        )
+    )
+
+    (:action unit-move
+    :parameters (?head ?newHead - loc)
+    :precondition (and
+        (headSnake ?head)
+        (tailSnake ?head)
+        (ADJACENT ?head ?newHead)
+        (not (blocked ?newHead))
+        (not (isPoint ?newHead))
+        )
+    :effect (and
+        (blocked ?newHead)
+        (headSnake ?newHead)
+        (tailSnake ?newHead)
+        (not (headSnake ?head))
+        (not (tailSnake ?head))
+        (not (blocked ?head))
+        (increase (total-cost) 1)
         )
     )
 
@@ -55,18 +74,19 @@ DOMAIN = """
         (headSnake ?head)
         (ADJACENT ?head ?newHead)
         (tailSnake ?tail)
-        (nextSnake ?newTail ?tail)
+        (nextSnake ?tail ?newTail)
         (not (blocked ?newHead))
         (not (isPoint ?newHead))
+        (not (= ?head ?tail))
         )
     :effect (and
         (blocked ?newHead)
         (headSnake ?newHead)
-        (nextSnake ?newHead ?head)
+        (nextSnake ?head ?newHead)
         (not (headSnake ?head))
         (not (blocked ?tail))
         (not (tailSnake ?tail))
-        (not (nextSnake ?newTail ?tail))
+        (not (nextSnake ?tail ?newTail))
         (tailSnake ?newTail)
         (increase (total-cost) 1)
         )
@@ -85,7 +105,7 @@ DOMAIN = """
     :effect (and
         (blocked ?newHead)
         (headSnake ?newHead)
-        (nextSnake ?newHead ?head)
+        (nextSnake ?head ?newHead)
         (not (headSnake ?head))
         (not (isPoint ?newHead))
         (not (collectedPoints ?curPoints))
@@ -100,7 +120,7 @@ DOMAIN = """
 
 
 PROBLEM = """
-(define (problem snake-{dim0}-{dim1}-{seed})
+(define (problem snake-{name}-{seed})
 (:domain snake)
 (:objects
     {num} - num
@@ -113,10 +133,8 @@ PROBLEM = """
     {blocked}
     {apples}
     (blocked grid-{x0}-{y0})
-    (blocked grid-{x1}-{y1})
     (headSnake grid-{x0}-{y0})
-    (tailSnake grid-{x1}-{y1})
-    (nextSnake grid-{x0}-{y0} grid-{x1}-{y1})
+    (tailSnake grid-{x0}-{y0})
     (collectedPoints n0)
 )
 (:goal (and
@@ -132,7 +150,8 @@ class Board:
     CLEAR = "_"
     APPLE = "a"
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, ignore_apples: bool = False):
+        self.name: str = re.sub(r"[^\w]+", "-", os.path.basename(path).split(".")[0])
         self.board: list[list[str]] = []
         with open(path, encoding="ascii") as f:
             for line in f.readlines():
@@ -143,7 +162,7 @@ class Board:
                 for c in line:
                     if c == Board.WALL:
                         row.append(Board.WALL)
-                    elif c == Board.APPLE:
+                    elif c == Board.APPLE and not ignore_apples:
                         row.append(Board.APPLE)
                     else:
                         row.append(Board.CLEAR)
@@ -162,6 +181,11 @@ class Board:
     def _dim(self) -> Iterable[tuple[int, int]]:
         for x in range(self.dim0):
             for y in range(self.dim1):
+                yield x, y
+
+    def _i_non_walls(self) -> Iterable[tuple[int, int]]:
+        for x, y in self._dim():
+            if self.board[x][y] != Board.WALL:
                 yield x, y
 
     def _adj(self, x: int, y: int) -> Iterable[tuple[int, int]]:
@@ -199,13 +223,39 @@ class Board:
         )
 
     def get_exit_effect(self) -> str:
-        return "\n".join(
-            [
-                12 * " " + self._get_not_blocked([]),
-                12 * " " + self._get_not_tail(),
-                12 * " " + self._get_not_snake(),
-            ]
-        )
+        outcomes = []
+        non_walls = list(self._i_non_walls())
+        for x, y in non_walls:
+            outcomes.append(
+                16 * " "
+                + f"1/{len(non_walls)} (and"
+                + " (headSnake grid-{x}-{y})"
+                + " (tailSnake grid-{x}-{y})"
+                + " (blocked grid-{x}-{y})"
+                + " ".join(
+                    [
+                        " ".join(
+                            [
+                                f"(not (blocked grid-{a}-{b})) (not (tailSnake grid-{a}-{b}))"
+                                for a, b in non_walls
+                                if (a, b) != (x, y)
+                            ]
+                        ),
+                        " ".join(
+                            [
+                                f"(not (nextSnake grid-{xA}-{yA} grid-{xB}-{yB}))"
+                                for (xA, yA) in self._dim()
+                                for (xB, yB) in self._adj(xA, yA)
+                                if self.board[xA][yA] != Board.WALL
+                                and self.board[xB][yB] != Board.WALL
+                            ]
+                        ),
+                    ]
+                )
+                + ")"
+            )
+
+        return "\n".join(outcomes)
 
     def get_adjacent(self) -> str:
         return self._join_atoms(
@@ -262,41 +312,45 @@ def generate_domain(board: Board, exit_cost: int) -> str:
     )
 
 
-def generate_problem(board: Board, seed: int, numPoints: int) -> str:
-    random.seed(seed)
-    while True:
-        x0 = random.randint(0, board.dim0 - 1)
-        y0 = random.randint(0, board.dim1 - 1)
-        if board.board[x0][y0] != Board.WALL:
-            sat = False
-            for x1, y1 in board._adj(x0, y0):
-                if board.board[x1][y1] != Board.WALL:
-                    sat = True
-                    break
-            if sat:
-                break
+def generate_problem(
+    board: Board, seed: int, numPoints: int, respawn_points: int
+) -> str:
+    non_walls = list(board._i_non_walls())
+    assert len(non_walls) >= 1 + respawn_points
+    random.shuffle(non_walls)
+    x0, y0 = non_walls[0]
+    respawn_points = non_walls[1 : 1 + respawn_points]
     apples = [(x, y) for x, y in board._dim() if board.board[x][y] == Board.APPLE]
-    while len(apples) == 0:
-        x = random.randint(0, board.dim0 - 1)
-        y = random.randint(0, board.dim1 - 1)
-        if board.board[x][y] != Board.WALL:
-            apples.append((x, y))
+    if len(apples) == 0:
+        i = random.randint(0, len(non_walls) - 1)
+        apples.append(non_walls[i])
     return PROBLEM.format(
-        dim0=board.dim0,
-        dim1=board.dim1,
+        name=board.name,
         seed=seed,
         num=" ".join((f"n{i}" for i in range(numPoints + 1))),
         nexxt=board.get_next(numPoints + 1),
         adjac=board.get_adjacent(),
-        border=board.get_border(),
+        border=board._join_atoms(
+            [f"(RESPAWN-POINT grid-{x}-{y})" for (x, y) in respawn_points]
+        ),
         blocked=board.get_blocked(),
         apples=board.get_apples(apples),
         x0=x0,
         y0=y0,
-        x1=x1,
-        y1=y1,
         points=numPoints,
     )
+
+
+def _distribute_apples(board: Board, num_apples: int):
+    cells = []
+    for x in range(board.dim0):
+        for y in range(board.dim1):
+            if board.board[x][y] == Board.CLEAR:
+                cells.append((x, y))
+    random.shuffle(cells)
+    for i in range(min(num_apples, len(cells))):
+        x, y = cells[i]
+        board.board[x][y] = Board.APPLE
 
 
 def main():
@@ -304,19 +358,41 @@ def main():
     p.add_argument("--map", help="Path to map file")
     p.add_argument("--seed", type=int, default=1734, help="Seed")
     p.add_argument(
-        "--exit-cost", type=int, default=10, help="Cost of exit/reset action"
+        "--respawn-cost", type=int, default=10, help="Cost of respawn action"
+    )
+    p.add_argument(
+        "--ignore-apples",
+        action="store_true",
+        help="Ignore apples defined in board",
+        default=False,
+    )
+    p.add_argument(
+        "--initial-apples",
+        type=int,
+        help="Number of apples placed initially on map",
+        default=0,
+    )
+    p.add_argument(
+        "--respawn-points",
+        type=int,
+        help="Number of respawn points on the map",
+        default=1,
     )
     p.add_argument("domain", help="Name of resulting domain file")
     p.add_argument("problem", help="Name of resulting problem file")
     p.add_argument("points", help="Number of points to collect", type=int)
     args = p.parse_args()
+
     assert args.points > 0
-    board = Board(args.map)
+    random.seed(args.seed)
+
+    board = Board(args.map, args.ignore_apples)
+    _distribute_apples(board, args.initial_apples)
 
     with open(args.domain, "w", encoding="ascii") as f:
-        f.write(generate_domain(board, args.exit_cost))
+        f.write(generate_domain(board, args.respawn_cost))
     with open(args.problem, "w", encoding="ascii") as f:
-        f.write(generate_problem(board, args.seed, args.points))
+        f.write(generate_problem(board, args.seed, args.points, args.respawn_points))
 
 
 if __name__ == "__main__":

@@ -2,12 +2,16 @@
 ;;
 
 (define (domain canadian-transport)
-  (:requirements :typing :action-costs)
+  (:requirements :typing :action-costs :negative-preconditions)
+
   (:types
         location target locatable - object
         vehicle package - locatable
         capacity-number - object
+        road-group - object
   )
+
+  (:constants END-GROUP - road-group)
 
   (:predicates 
      (at ?x - locatable ?v - location)
@@ -19,77 +23,65 @@
      (road_free ?l1 ?l2 - location)
      (road_unknown ?l1 ?l2 - location)
 
+    (ROAD_GROUP ?l1 ?l2 - location ?g - road-group)
+    (road_group_plown ?g - road-group)
+    (road_group_not_plown ?g - road-group)
+
     (plow)
+    (current_group ?g - road-group)
+    (NEXT_GROUP ?g1 ?g2 - road-group)
   )
 
   (:functions
      (road-length ?l1 ?l2 - location) - number
-     (plow-cost ?l1 ?l2 - location) - number
+     (plow-cost ?g - road-group) - number
      (total-cost) - number
   )
 
-  (:action request-plow-symmetric
-    :parameters (?l1 ?l2 - location) 
+  (:action plow-roads
+    :parameters (?g ?gg - road-group) 
     :precondition (and
         (plow)
-        (road_unknown ?l1 ?l2)
-        (road_unknown ?l2 ?l1)
+        (current_group ?g)
+        (NEXT_GROUP ?g ?gg)
     )
     :effect (and
-        (not (road_unknown ?l1 ?l2))
-        (not (road_unknown ?l2 ?l1))
-        (road_free ?l1 ?l2)
-        (road_free ?l2 ?l1)
-        (increase (total-cost) (plow-cost ?l1 ?l2))
+        (not (current_group ?g))
+        (current_group ?gg)
+        (road_group_plown ?g)
+        (increase (total-cost) (plow-cost ?g))
     )
   )
 
-  (:action request-plow-asymmetric
-    :parameters (?l1 ?l2 - location) 
+  (:action dont-plow-roads
+    :parameters (?g ?gg - road-group) 
     :precondition (and
         (plow)
-        (road_unknown ?l1 ?l2)
-        (not (road_unknown ?l2 ?l1))
+        (current_group ?g)
+        (NEXT_GROUP ?g ?gg)
     )
     :effect (and
-        (not (road_unknown ?l1 ?l2))
-        (road_free ?l1 ?l2)
-        (increase (total-cost) (plow-cost ?l1 ?l2))
+        (not (current_group ?g))
+        (current_group ?gg)
+        (road_group_not_plown ?g)
+        (increase (total-cost) 0)
     )
   )
 
   (:action start-delivery
     :parameters ()
-    :precondition (plow)
-    :effect (and (not (plow)) (increase (total-cost) 0))
+    :precondition (and (plow) (current_group END-GROUP))
+    :effect (and (not (plow)) (not (current_group END-GROUP)) (increase (total-cost) 0))
   )
 
-  (:action inspect-road-symmetric
-    :parameters (?v - vehicle ?l1 ?l2 - location)
+  (:action inspect-road
+    :parameters (?v - vehicle ?l1 ?l2 - location ?g - road-group)
     :precondition (and
         (not (plow))
         (at ?v ?l1)
         (road_unknown ?l1 ?l2)
-        (road_unknown ?l2 ?l1)
-    )
-    :effect (and
-        (not (road_unknown ?l1 ?l2))
-        (not (road_unknown ?l2 ?l1))
-        (probabilistic 
-            0.8 (and (road_free ?l1 ?l2) (road_free ?l2 ?l1))
-            0.2 (and (road_blocked ?l1 ?l2) (road_blocked ?l2 ?l1))
-        )
-        (increase (total-cost) 0)
-    )
-  )
-
-  (:action inspect-road-asymmetric
-    :parameters (?v - vehicle ?l1 ?l2 - location)
-    :precondition (and
-        (not (plow))
-        (at ?v ?l1)
-        (road_unknown ?l1 ?l2)
-        (not (road_unknown ?l2 ?l1))
+        (ROAD_GROUP ?l1 ?l2 ?g)
+        (road_group_not_plown ?g)
     )
     :effect (and
         (not (road_unknown ?l1 ?l2))
@@ -97,6 +89,22 @@
             0.8 (and (road_free ?l1 ?l2))
             0.2 (and (road_blocked ?l1 ?l2))
         )
+        (increase (total-cost) 0)
+    )
+  )
+
+  (:action inspect-plown-road
+    :parameters (?v - vehicle ?l1 ?l2 - location ?g - road-group)
+    :precondition (and
+        (not (plow))
+        (at ?v ?l1)
+        (road_unknown ?l1 ?l2)
+        (ROAD_GROUP ?l1 ?l2 ?g)
+        (road_group_plown ?g)
+    )
+    :effect (and
+        (not (road_unknown ?l1 ?l2))
+        (road_free ?l1 ?l2)
         (increase (total-cost) 0)
     )
   )

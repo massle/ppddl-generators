@@ -4,6 +4,8 @@ import argparse
 import random
 from fractions import Fraction
 
+MAX_RETRIES = 3
+
 DOMAIN = """
 (define (domain lucky-solitaire)
 (:requirements :probabilistic-effects :typing :negative-preconditions :strips)
@@ -84,6 +86,50 @@ PROBLEM = """
 """
 
 
+class DependencyGraph:
+    def __init__(self, num_colors: int, num_stacks: int):
+        self.nodes_by_color: list[list[tuple[int, int, int]]] = [
+            [] for _ in range(num_colors)
+        ]
+        self.nodes_by_stack: list[list[tuple[int, int]]] = [
+            [] for _ in range(num_stacks)
+        ]
+
+    def push(self, node: tuple[int, int], stack: int) -> bool:
+        assert stack < len(self.nodes_by_stack)
+        self.nodes_by_color[node[0]].append(
+            (node[1], stack, len(self.nodes_by_stack[stack]))
+        )
+        self.nodes_by_stack[stack].append(node)
+
+        closed = set()
+        stack_trace = set()
+
+        def dfs(stack_: int, idx_: int):
+            assert stack_ not in stack_trace
+            stack_trace.add(stack_)
+            color, card = self.nodes_by_stack[stack_][idx_]
+            for pred, stack2, idx2 in self.nodes_by_color[color]:
+                if pred < card:
+                    if (stack2, idx2) in closed:
+                        continue
+                    if stack2 in stack_trace:
+                        return False
+                    if not dfs(stack2, idx2):
+                        return False
+            stack_trace.remove(stack_)
+            closed.add((stack_, idx_))
+            return True
+
+        for i in reversed(range(len(self.nodes_by_stack[stack]) - 1)):
+            if not dfs(stack, i):
+                self.nodes_by_color[node[0]].pop(-1)
+                self.nodes_by_stack[stack].pop(-1)
+                return False
+
+        return True
+
+
 def generate_domain(num_cards: int, num_colors: int) -> str:
     assert num_cards > 0 and num_colors > 0
     cards = [f"card{i}" for i in range(num_cards)]
@@ -98,25 +144,27 @@ def generate_domain(num_cards: int, num_colors: int) -> str:
 
 
 def generate_problem(
-    num_cards: int, num_colors: int, num_stacks: int, seed: int
+    num_cards: int,
+    num_colors: int,
+    num_stacks: int,
+    seed: int,
 ) -> str:
-    assert (
-        num_cards > 0
-        and num_colors > 0
-        and num_stacks >= 0
-        and num_stacks < num_cards * num_colors
-    )
+    assert num_cards > 0 and num_colors > 0 and num_stacks >= 0
     random.seed(seed)
     cards = ["DUMMY_CARD"] + [f"STACK{i}" for i in range(num_stacks)]
-    stacks = []
-    n = num_stacks
-    while n > 0:
-        card = random.randint(0, num_cards - 1)
-        color = random.randint(0, num_colors - 1)
-        if (card, color) in stacks:
-            continue
-        stacks.append((card, color))
-        n -= 1
+    depg = DependencyGraph(num_colors, num_stacks)
+    available_cards = [
+        (color, card) for color in range(num_colors) for card in range(num_cards)
+    ]
+    for stack in range(num_stacks):
+        for _ in range(stack + 1):
+            if len(available_cards) == 0:
+                break
+            for _ in range(MAX_RETRIES):
+                i = random.randint(0, len(available_cards) - 1)
+                if depg.push(available_cards[i], stack):
+                    del available_cards[i]
+                    break
     init = (
         [f"(home DUMMY_CARD color{i})" for i in range(num_colors)]
         + [
@@ -131,11 +179,25 @@ def generate_problem(
             for j in range(i + 1, num_cards)
         ]
         + [
-            f"(on card{i} color{j} STACK{k} DUMMY_COLOR)"
-            for (k, (i, j)) in enumerate(stacks)
+            f"(on card{card} color{color} STACK{i} DUMMY_COLOR)"
+            for i in range(num_stacks)
+            for (color, card) in depg.nodes_by_stack[i][:1]
         ]
-        + [f"(clear card{i} color{j})" for (i, j) in stacks]
-        + [f"(drawn card{i} color{j})" for (i, j) in stacks]
+        + [
+            f"(on card{depg.nodes_by_stack[i][j][1]} color{depg.nodes_by_stack[i][j][0]} card{depg.nodes_by_stack[i][j-1][1]} color{depg.nodes_by_stack[i][j-1][0]})"
+            for i in range(num_stacks)
+            for j in range(1, len(depg.nodes_by_stack[i]))
+        ]
+        + [
+            f"(clear card{card} color{color})"
+            for i in range(num_stacks)
+            for (color, card) in depg.nodes_by_stack[i][-1:]
+        ]
+        + [
+            f"(drawn card{card} color{color})"
+            for i in range(num_stacks)
+            for (color, card) in depg.nodes_by_stack[i]
+        ]
     )
     goal = [f"(home card{num_cards - 1} color{i})" for i in range(num_colors)]
     return PROBLEM.format(
@@ -165,7 +227,14 @@ def main():
     with open(args.domain_file, "w", encoding="ascii") as f:
         f.write(generate_domain(args.cards, args.colors))
     with open(args.problem_file, "w", encoding="ascii") as f:
-        f.write(generate_problem(args.cards, args.colors, args.stacks, args.seed))
+        f.write(
+            generate_problem(
+                args.cards,
+                args.colors,
+                args.stacks,
+                args.seed,
+            )
+        )
 
 
 if __name__ == "__main__":
