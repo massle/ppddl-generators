@@ -17,4 +17,12 @@ Therefore, given a policy with expected cost of X in the PDDL version, this is t
 
 
 
+# Layouts
+
+* layouts/original_layours folder contain the layouts from the original assignment from Berkeley. 
+
+We base our layouts on those. The names we gave to the layouts include the number of reachable cells and the number of ghosts.
+
+
+
 Implemented by Alvaro Torralba
